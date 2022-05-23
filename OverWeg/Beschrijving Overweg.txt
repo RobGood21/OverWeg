@@ -1,0 +1,21 @@
+Overweg,
+3 verschillende lichten
+knipper1 > 1 zijde overweg 2xpaal en boom (3 led)
+knipper2 > 1 zijde overweg 2xpaal en boom (3 led)
+knipper1* als knipper1 aparte leddriver
+knipper2* als knipper2 aparte leddriver
+constant bomen beide zijden 
+
+
+
+
+
+GPIOR1
+bit0 one shot
+bit1 one shot 2
+bit2 read() boolean
+bit3
+bit4
+bit5
+bit6 tiggle 1
+bit7 toggle 2
