@@ -43,7 +43,7 @@ byte timer[at]; //timers 3x?
 byte timercount[at];
 byte timerlot[at];//(lot=leds on timer) effect op welke leds? 0~2 leds on 3~5 leds off
 byte timerseq[at];
-byte tc=10; //timing moment of timers
+byte tc = 10; //timing moment of timers
 
 
 
@@ -51,8 +51,8 @@ byte tc=10; //timing moment of timers
 volatile byte sf = 0; //servo focus welke servo wordt aangestuurd, alleen in loop gebruiken
 byte sv; //focus welke servo in program mode
 
-byte seq; //fase van sequentie
-byte pf = 0;
+byte pfase = 0; //pf=program fase
+byte plevel = 0; //program level
 //timers, counters
 volatile byte pc[2];  //pulscount in ISR
 byte switchcount; //teller voor ingedrukt houden knop 3
@@ -100,9 +100,6 @@ void MEM_read() {
 	servo[1].pos = servo[0].left;
 
 	sb = 0;
-	seq = 0;
-
-	//s1speed = 2; //<10 vertragen >10 versnellen
 }
 
 ISR(TIMER1_COMPA_vect) {
@@ -155,10 +152,12 @@ void read() {
 	else if (~status & (1 << 2) && ~PINB & (1 << 3)) {
 		countlp++;
 		if (countlp > 50) {
-			if (~GPIOR1 & (1 << 2)) { //one shot longpress
-				GPIOR1 |= (1 << 2);
-				longpress(); //longpress 
-			}
+		countlp = 0; //reset teller
+			//if (~GPIOR1 & (1 << 2)) { //one shot longpress
+			//	GPIOR1 |= (1 << 2);
+			longpress(); //longpress 
+	
+		//}
 		}
 	}
 	//huidige schakel stand opslaan in status bit
@@ -170,21 +169,30 @@ void read() {
 	}
 }
 void longpress() {
-	switch (pf) {
-	case 2:
-		sv = 0; //sf=servo focus
+
+	switch (plevel) {
+	case 0: //servo instellen snelheid 
+		//enkel knipper, enkele knipper op andere led
 		break;
-	case 3:
-		sv = 1;
+	case 1: //servo instellen posities
+		//dubbel knipper
 		break;
 	}
-	servo[sv].rq = (servo[sv].left + servo[sv].right) / 2;
-	seq = 50; //begin positie programmering servo
+
+	plevel++;
+	switch (pfase) {
+	case 2: //instellen aantal levels in deze pfase
+		if (plevel > 2)plevel = 0;
+		break;
+	}
+	sequence(50);
+
+
 }
 
-void sequence() { //od=open dicht open false dicht true
+void sequence(byte seq) { //od=open dicht open false dicht true
 	//temp
-	byte b;
+	byte b = 0;
 	//cyclus, sequence
 
 	switch (seq) {
@@ -221,21 +229,20 @@ void sequence() { //od=open dicht open false dicht true
 			servo[i].timercount = 0;
 		}
 		break;
-	case 30: //Test servo 1 pf=2 knipper led links
-		settimer(1, 2, B100000, 31);
-		break;
-	case 31:
-		settimer(1, 80, B100, 30);
+	case 30: //Test servo 1 pfase=2 knipper led links
+		b = B100000;
+		if (sv == 1)b = B010000;
+		settimer(1, 2, b, 31);
 		break;
 
-	case 32: //Test servo 2 pf=3 knipper led rechts
-		settimer(1, 2, B010000, 33);
-		break;
-	case 33:
-		settimer(1, 80, B010, 32);
+	case 31:
+		b = B100;
+		if (sv == 1)b = B010;
+		settimer(1, 80, b, 30);
 		break;
 
 	case 50: //start positie program servo
+		servo[sv].rq = servo[sv].left;// (servo[sv].left + servo[sv].right) / 2;
 		settimer(2, 5, 0, 51); //wachtlus totdat servo op positie is
 		break;
 
@@ -244,22 +251,23 @@ void sequence() { //od=open dicht open false dicht true
 			settimer(2, 5, 0, 52); //servo op positie
 		}
 		else {
-			settimer(2, 5, 0, 51); //wachtlus totdat servo op positie is
+			settimer(2, 5, 0, 51); //wachtlus totdat servo op positie is		
 		}
 		break;
 
-	case 52: //52&53 zijn een knipperlicht 
-		b = B010;
-		if (sv == 1)b = B100;
-		settimer(2, 10, b, 53);
+	case 52: //servo op positie, wissel richting
+
+		if (servo[sv].pos == servo[sv].left) {
+			servo[sv].rq = servo[sv].right;
+		}
+		else {
+			servo[sv].rq = servo[sv].left;
+		}
+		settimer(2, 5, 0, 51); //wachtlus totdat servo op positie is
 		break;
-	case 53:
-		b = B010000;
-		if (sv == 1)b = B100000;
-		settimer(2, 1, b, 52);
-		break;
+
 	}
-	seq = 0; //altijd?
+
 }
 
 
@@ -292,11 +300,10 @@ void timers() { //called from loop 20ms
 					}
 				}
 				timer[i] = 0; //reset free timer
-				seq = timerseq[i]; //next proces in sequencer
+				sequence(timerseq[i]);//next proces in sequencer
 			}
 		}
 	}
-
 	//servo timers (voor de start random)
 	for (byte i = 0; i < 2; i++) {
 		if (servo[i].reg & (1 << 0)) { //timer aan?	
@@ -320,22 +327,23 @@ void SWon(byte sw) {
 	//0=sensor1 1=sensor2 2=switch
 	//sb |= (1 << sw); //temp led aan
 
-	switch (pf) {
+	switch (pfase) {
 	case 0:
 		switch (sw) {
 		case 0:
 			//sv = 1;
+
 			//seq = 52;
 			break;
 		case 1:
 			break;
 		case 2:
-			seq = 10; //sluit overweg
+			sequence(10);//sluit overweg
 			break;
 		}
 		break;
 
-	case 1: //pf=1 led test
+	case 1: //pfase=1 led test
 
 		switch (sw) {
 		case 0:
@@ -347,7 +355,7 @@ void SWon(byte sw) {
 		}
 		break;
 
-	case 2: //pf=2 servo 1 test
+	case 2: //pfase=2 servo  test
 
 		switch (sw) {
 		case 0:
@@ -355,43 +363,51 @@ void SWon(byte sw) {
 		case 1:
 			break;
 		case 2:
-			GPIOR1 ^= (1 << 6);
-			if (GPIOR1 & (1 << 6)) {
-				servo[0].rq = servo[0].right;
+			if (sv == 0) {
+				GPIOR1 ^= (1 << 6);
+				if (GPIOR1 & (1 << 6)) {
+					servo[0].rq = servo[0].right;
+				}
+				else {
+					servo[0].rq = servo[0].left;
+				}
 			}
 			else {
-				servo[0].rq = servo[0].left;
+				GPIOR1 ^= (1 << 7);
+				if (GPIOR1 & (1 << 7)) {
+					servo[1].rq = servo[1].right;
+				}
+				else {
+					servo[1].rq = servo[1].left;
+				}
 			}
 			break;
 		}
+
 		break;
 
-	case 3: //pf=3 servo 2 test
-
-		switch (sw) {
-		case 0:
-			break;
-		case 1:
-			break;
-		case 2:
-			GPIOR1 ^= (1 << 7);
-			if (GPIOR1 & (1 << 7)) {
-				servo[1].rq = servo[1].right;
-			}
-			else {
-				servo[1].rq = servo[1].left;
-			}
-			break;
-		}
+	case 3:
 		break;
-
 	}
 
 
 	if (sw == 4) {
 		//program switch aparte knop op PB4, moet altijd onafhankelijk van program fase
-		pf++;
-		if (pf > apf)pf = 0; //apf aantal program fases zie #define
+		switch (pfase) {
+		case 2: //uitzondering voor de twee servoos
+			if (sv == 0) {
+				sv = 1;
+			}
+			else {
+				pfase++;
+				sv = 0;
+			}
+			break;
+		default:
+			pfase++;
+			if (pfase > apf)pfase = 0; //apf aantal program fases zie #define
+			break;
+		}
 		Programs();
 	}
 }
@@ -401,7 +417,7 @@ void SWoff(byte sw) {
 
 	//sb &= ~(1 << sw); //temp led off
 
-	switch (pf) {
+	switch (pfase) {
 	case 0:
 		switch (sw) {
 		case 0:
@@ -409,9 +425,13 @@ void SWoff(byte sw) {
 		case 1:
 			break;
 		case 2:
-			seq = 20;// bomen open dus de overweg
+			sequence(20);// bomen open dus de overweg
 			break;
 		}
+		break;
+	case 2: //servo 1 test 
+		break;
+	case 3: //servo 2 test
 		break;
 	}
 }
@@ -423,27 +443,23 @@ void Programs() {
 	}
 	GPIOR1 &= ~(1 << 2);  //reset one shot long press
 
-	switch (pf) {
+	switch (pfase) {
 	case 0:
 		//set program mode naar in bedrijf...
 		//leds uit_aan_uit
-		seq = 2;
+		sequence(2);
 		break;
 	case 1: //alle leds on
-		seq = 1;
+		sequence(1);
 		break;
 	case 2: //servo 1 test
 		uit;
-		seq = 30;
+		sequence(30);
 		break;
 	case 3: //servo 2 test
-		uit;
-		seq = 32;
 		break;
 	}
 }
-
-
 void SV_control() {
 	/*
 	controls de servo's
@@ -480,8 +496,6 @@ void SV_control() {
 				servo[sf].pos = servo[sf].pos + speed;
 			}
 		}
-
-
 		pc[sf] = 0; //reset puls counter, in ISR
 		sb |= (1 << 6 + sf); //set servo pin	
 		//sb ^= (1 << 0);
@@ -507,7 +521,7 @@ void slow() {
 	}
 
 	if (slowcount == 10) {
-		timers();			
+		timers();
 	}
 
 
@@ -518,21 +532,16 @@ void slow() {
 		if (count > 2)count = 0;
 		sb &= ~(56 << 0); //clear bit 3-4-5
 		sb |= (1 << count + 3); //opvolgend 3 4 5 om sensors en switch te scannen
-		Shift();		
+		Shift();
 	}
 
-	if (slowcount > 19) slowcount = 0;	
+	if (slowcount > 19) slowcount = 0;
 }
 
 void loop() {
-
-	sequence(); //gebeurtenissen
-
-	//veranderen een millis teller maken en op de teller stand de timers en servoos in tijd gescheiden van elkaar uitvoeren
-
+	//millis counter
 	if (millis() > oldmillis) {
 		oldmillis = millis();
 		slow();
 	}
-
 }
