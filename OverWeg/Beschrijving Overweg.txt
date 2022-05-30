@@ -13,9 +13,9 @@ constant bomen beide zijden
 GPIOR1
 bit0 one shot
 bit1 one shot 2
-bit2 read() boolean
+bit2 one shot long press knop2 
 bit3
 bit4
 bit5
-bit6 tiggle 1
-bit7 toggle 2
+bit6 toggle servo 1
+bit7 toggle servo 2
