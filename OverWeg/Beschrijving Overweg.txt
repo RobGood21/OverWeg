@@ -11,8 +11,8 @@ constant bomen beide zijden
 
 
 GPIOR1
-bit0 one shot
-bit1 one shot 2
+bit0 toggle servo
+bit1 
 bit2 one shot long press knop2 
 bit3
 bit4
