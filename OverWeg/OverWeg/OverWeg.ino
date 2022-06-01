@@ -17,6 +17,10 @@
 # define apf 3 //aantal program fases
 # define at 4 //aantal timers
 # define uit sb &= ~(7 << 0); //zet leds uit
+# define aan sb |=(7<<0); //leds aan
+
+# define servomin 30  //minimaal bereik open
+# define servomax 240 //maximaal bereik close
 
 # define sb GPIOR0 //gebruik ingebakken register
 //bit0 led1; bit1 led2; bit2 led3; bit3 sensL; bit4 sensR ;bit5 switch;bit6 servo1;bit7 servo2
@@ -32,8 +36,8 @@ byte status = 7; //bit0=M1/s1 bit1=M2/s2 bit2=SW/s0
 struct Servo
 {
 	byte reg; //bit0=timer on off
-	byte left; //minimaal 20 uit eeprom
-	byte right; //max 140 geeft ongeveer 160graden met TZT servo
+	byte open; //minimaal 20 uit eeprom
+	byte close; //max 140 geeft ongeveer 160graden met TZT servo
 	volatile byte rq; //gewenste eind positie
 	volatile byte pos;
 	unsigned int timer;
@@ -43,6 +47,7 @@ Servo servo[2];
 
 byte countservo = 5;
 byte speedservo = 0;
+byte tempspeedservo = 0;
 byte timer[at]; //timers 3x? 
 byte timercount[at];
 byte timerlot[at];//(lot=leds on timer) effect op welke leds? 0~2 leds on 3~5 leds off
@@ -93,15 +98,22 @@ void MEM_read() {
 
 
 	//uit EEprom halen standen servo
-	servo[0].left = 90;
-	servo[0].right = 120;
-	servo[1].left = 90;
-	servo[1].right = 120;
+	servo[0].open = EEPROM.read(11);
+	if (servo[0].open < servomin || servo[0].open > servomax)servo[0].open = 180;
+	servo[0].close = EEPROM.read(12);
+	if (servo[0].close < servomin || servo[0].close > servomax)servo[0].close = 80;
+	servo[1].open = EEPROM.read(13);
+	if (servo[1].open < servomin || servo[1].open > servomax)servo[1].open = 180;
+	servo[1].close = EEPROM.read(14);
+	if (servo[1].close < servomin || servo[1].close > servomax)servo[1].close = 80;
 
-	servo[0].rq = servo[0].left; //beginstand servo1
-	servo[1].rq = servo[1].left;
-	servo[0].pos = servo[0].left;
-	servo[1].pos = servo[0].left;
+
+
+
+	servo[0].rq = servo[0].open; //beginstanden servo1
+	servo[1].rq = servo[1].open;
+	servo[0].pos = servo[0].open;
+	servo[1].pos = servo[0].open;
 
 	sb = 0;
 }
@@ -154,13 +166,11 @@ void read() {
 	}
 	else if (~status & (1 << 2) && ~PINB & (1 << 3)) {
 		countlp++;
-		if (countlp > 50) {
-			countlp = 0; //reset teller
-				//if (~GPIOR1 & (1 << 2)) { //one shot longpress
-				//	GPIOR1 |= (1 << 2);
+		if (countlp > 50 && ~GPIOR1 & (1 << 2) && pfase>0) {
+			GPIOR1 |= (1 << 2);
 			longpress(); //longpress 
 
-		//}
+
 		}
 	}
 	//huidige schakel stand opslaan in status bit
@@ -172,23 +182,29 @@ void read() {
 	}
 }
 void longpress() {
-
-	switch (plevel) {
-	case 0: //servo instellen snelheid 
-		//enkel knipper, enkele knipper op andere led
-		break;
-	case 1: //servo instellen posities
-		//dubbel knipper
-		break;
-	}
+	sequence(6); //flash
 
 	plevel++;
 	switch (pfase) {
 	case 2: //instellen aantal levels in deze pfase
-		if (plevel > 2)plevel = 0;
+		if (plevel > 3)plevel = 0;
 		break;
 	}
-	sequence(50);
+	timer[2] = 0; //reset de te gebruiken timer
+	switch (plevel) {
+	case 1: //servo instellen snelheid 
+		//dubbel knipper op contra led
+		sequence(50);
+		break;
+	case 2: //servo instellen positie open
+		//triple knipper		
+		servo[sv].rq = servo[sv].open;
+		break;
+	case 3://servo instellen positie close
+		servo[sv].rq = servo[sv].close;
+		break;
+	}
+
 
 
 }
@@ -199,8 +215,7 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 	//cyclus, sequence
 
 	switch (seq) {
-	case 1: // free
-
+	case 0: // free
 		break;
 		//*******afsluiting programmeer mode
 	case 2: //program mode back to 0 
@@ -212,7 +227,15 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 	case 4:
 		settimer(0, 50, B111000, 0); //1sec leds aan, daarna in bedrijf
 		break;
-		//**********************************
+		//***********flash tussen twee plevels in 
+	case 6:	
+		settimer(0, 1, B111, 7);
+		break;
+	case 7:
+	settimer(0, 50, B111000, 0);
+		break;
+		//*********************************************
+
 
 	case 10:
 		//start bel, start lights/sluit bomen 
@@ -232,8 +255,8 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 			servo[i].timercount = 0;
 		}
 		break;
-		//******flash in program
 
+		//******flash in program
 	case 30: //Test servo 1 pfase=2 knipper led links
 		//led off na flash
 		switch (sv) { //keuze led combinatie die gaat flashen
@@ -253,7 +276,7 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 			countflsh = 0;
 		}
 		else {
-			flashpauze = 6;
+			flashpauze = 10;
 		}
 		break;
 
@@ -272,8 +295,11 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		break;
 		//********end flash
 
+
+
+		//*******servo heen en weer (speed instellen)
 	case 50: //start positie program servo
-		servo[sv].rq = servo[sv].left;// (servo[sv].left + servo[sv].right) / 2;
+		servo[sv].rq = servo[sv].open;// (servo[sv].open + servo[sv].close) / 2;
 		settimer(2, 5, 0, 51); //wachtlus totdat servo op positie is
 		break;
 
@@ -288,17 +314,16 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 
 	case 52: //servo op positie, wissel richting
 
-		if (servo[sv].pos == servo[sv].left) {
-			servo[sv].rq = servo[sv].right;
+		if (servo[sv].pos == servo[sv].open) {
+			servo[sv].rq = servo[sv].close;
 		}
 		else {
-			servo[sv].rq = servo[sv].left;
+			servo[sv].rq = servo[sv].open;
 		}
 		settimer(2, 5, 0, 51); //wachtlus totdat servo op positie is
 		break;
-
+		//**********einde servo heen en weer
 	}
-
 }
 
 
@@ -340,14 +365,14 @@ void timers() { //called from loop 20ms
 		if (servo[i].reg & (1 << 0)) { //timer aan?	
 			servo[i].timercount++;
 			if (servo[i].timercount > servo[i].timer) {
-				servo[i].rq = servo[i].right;
+				servo[i].rq = servo[i].close;
 				servo[i].reg &= ~(1 << 0); //stop timer
 			}
 		}
 		else if (servo[i].reg & (1 << 1)) { //timer aan?	{			
 			servo[i].timercount++;
 			if (servo[i].timercount > servo[i].timer) {
-				servo[i].rq = servo[i].left;
+				servo[i].rq = servo[i].open;
 				servo[i].reg &= ~(1 << 1); //stop timer
 			}
 		}
@@ -386,37 +411,36 @@ void SWon(byte sw) {
 		}
 		break;
 
-	case 2: //pfase=2 servo  test
+	case 2: //pfase=2 servo  test en instellen
 
 		switch (sw) {
-		case 0:
-			break;
-		case 1:
-			break;
 		case 2:
-			if (sv == 0) {
-				GPIOR1 ^= (1 << 6);
-				if (GPIOR1 & (1 << 6)) {
-					servo[0].rq = servo[0].right;
+			switch (plevel) {
+			case 0:
+				if (sv == 0) {
+					GPIOR1 ^= (1 << 6);
+					if (GPIOR1 & (1 << 6)) {
+						servo[0].rq = servo[0].close;
+					}
+					else {
+						servo[0].rq = servo[0].open;
+					}
 				}
 				else {
-					servo[0].rq = servo[0].left;
+					flag ^= (1 << 7);
+					if (flag & (1 << 7)) {
+						servo[1].rq = servo[1].close;
+					}
+					else {
+						servo[1].rq = servo[1].open;
+					}
 				}
-			}
-			else {
-				GPIOR1 ^= (1 << 7);
-				if (GPIOR1 & (1 << 7)) {
-					servo[1].rq = servo[1].right;
-				}
-				else {
-					servo[1].rq = servo[1].left;
-				}
+				break; //instellen positie open
+
 			}
 			break;
 		}
-
 		break;
-
 	case 3:
 		break;
 	}
@@ -424,29 +448,47 @@ void SWon(byte sw) {
 
 	if (sw == 4) {
 		//program switch aparte knop op PB4, moet altijd onafhankelijk van program fase
-		plevel = 0;
+
 		switch (pfase) {
 		case 2: //uitzondering voor de twee servoos
-			if (sv == 0) {
-				sv = 1;
-
-			}
-			else {
-				pfase++;
-				sv = 0;
-			}
+			switch (plevel) {
+			case 0:
+				if (sv == 0) {
+					sv = 1;
+				}
+				else {
+					pfase++;
+					sv = 0;
+				}
+				break;
+			case 2: //instellen servo open positie
+				if (servo[sv].open > servomin) servo[sv].open--;
+				servo[sv].rq = servo[sv].open;
+				break;
+			case 3: //instellen servo close positie
+				if (servo[sv].close > servomin) servo[sv].close--;
+				servo[sv].rq = servo[sv].close;
+				break;
+			} //end plevel
 			break;
+
 		default:
+			plevel = 0;
 			pfase++;
 			if (pfase > apf)pfase = 0; //apf aantal program fases zie #define
 			break;
-		}
+		} //end pfase
+
 		Programs();
 	}
 }
 
 void SWoff(byte sw) {
-	if (sw == 2)countlp = 0; //reset longpress timer
+	if (sw == 2) {
+		countlp = 0; //reset longpress timer
+		GPIOR1 &= ~(1 << 2);
+	}
+
 
 	//sb &= ~(1 << sw); //temp led off
 
@@ -472,7 +514,16 @@ void SWoff(byte sw) {
 				speedservo--;
 				if (speedservo > 30)speedservo = 30;
 				break;
+			case 2:
+				if (servo[sv].open < servomax) servo[sv].open++;
+				servo[sv].rq = servo[sv].open;
+				break;
+			case 3: //instellen positie close
+				if (servo[sv].close < servomax) servo[sv].close++;
+				servo[sv].rq = servo[sv].close;
+				break;
 			}
+
 			break;
 		}
 		break;
@@ -493,6 +544,10 @@ void Programs() {
 		//set program mode naar in bedrijf...
 		// Aanpassingen opslaan in EEPROM
 		EEPROM.update(10, speedservo);
+		EEPROM.update(11, servo[0].open);
+		EEPROM.update(12, servo[0].close);
+		EEPROM.update(13, servo[1].open);
+		EEPROM.update(14, servo[1].close);		
 		//leds uit_aan_uit
 		sequence(2);
 		break;
