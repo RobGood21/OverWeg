@@ -13,13 +13,13 @@
 
 #ifndef _VSARDUINO_H_
 #define _VSARDUINO_H_
-#define __AVR_attiny85__
-#define __AVR_ATTINY85__
-#define __AVR_ATtiny85__
+#define __AVR_attiny85__ 1
+#define __AVR_ATTINY85__ 1
+#define __AVR_ATtiny85__ 1
 #define F_CPU 16000000L
 #define ARDUINO 108013
-#define ARDUINO_attiny
-#define ARDUINO_ARCH_AVR
+#define ARDUINO_attiny 1
+#define ARDUINO_ARCH_AVR 1
 #define __cplusplus 201103L
 #define _Pragma(x)
 #define __AVR__
@@ -71,7 +71,7 @@ typedef void *__builtin_va_list;
 
 
 
-#include "arduino.h"
+#include <arduino.h>
 #include <pins_arduino.h> 
 //#undef F
 //#define F(string_literal) ((const PROGMEM char *)(string_literal))

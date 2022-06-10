@@ -14,8 +14,9 @@ GPIOR1
 bit0 toggle servo
 bit1 
 bit2 one shot long press knop2 
-bit3
-bit4
+bit3 true overweg gesloten; false overweg open
+bit4 Stop blokkade bij start van de sluit beweging is de situatie gelijk aan het bereiken van de eindstand bij openen, gevolg
+dat de leds weer uit gaan, met flag 4 wordt een timer gestart die deze periode even overbrugt.
 bit5
 bit6 toggle servo 1
 bit7 toggle servo 2

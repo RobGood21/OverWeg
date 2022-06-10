@@ -10,9 +10,14 @@
 
 //byte sb; //shiftbyte GPIOR0 (gaat ff sneller)
 
-
-
 #include <EEPROM.h>
+
+# define Ahob 15 //nieuwe ahob snelheid 90x per minuut 
+# define Ahobold 32 //oude ahob 45x per minuut
+# define starttijdbomen 50 //hoelang minimaal tussen starten knipperlicht en sluiten bomen
+//????starttijdbomen instelling van maken
+
+
 
 # define apf 3 //aantal program fases
 # define at 4 //aantal timers
@@ -21,21 +26,11 @@
 
 # define servomin 30  //minimaal bereik open
 # define servomax 240 //maximaal bereik close
-
 # define sb GPIOR0 //gebruik ingebakken register
-//bit0 led1; bit1 led2; bit2 led3; bit3 sensL; bit4 sensR ;bit5 switch;bit6 servo1;bit7 servo2
-# define flag GPIOR1 //gebruik intern voor snelle flags
-//bit0 one shot 5ms(servo 1); 
-//bit1 one shot 10ms (servo2); 
-//bit2 flag in read, misschien is dit anders slimmer te doen?
-//bit3 flag opstarten naar programmode 1 gaan aan switch is ingedrukt
-//bit5 vertraging servo timer; bit6 switch 2 toggle; bit7 switch3 toggle
-
 byte status = 7; //bit0=M1/s1 bit1=M2/s2 bit2=SW/s0
-
 struct Servo
 {
-	byte reg; //bit0=timer on off
+	byte reg; //bit0=timer on  bit1=open(false)/close 
 	byte open; //minimaal 20 uit eeprom
 	byte close; //max 140 geeft ongeveer 160graden met TZT servo
 	volatile byte rq; //gewenste eind positie
@@ -44,7 +39,6 @@ struct Servo
 	unsigned int timercount;
 };
 Servo servo[2];
-
 byte countservo = 5;
 byte speedservo = 0;
 byte tempspeedservo = 0;
@@ -53,7 +47,7 @@ byte timercount[at];
 byte timerlot[at];//(lot=leds on timer) effect op welke leds? 0~2 leds on 3~5 leds off
 byte timerseq[at];
 byte tc = 10; //timing moment of timers
-
+byte knipper; //tijd van knipperen
 
 
 
@@ -71,8 +65,6 @@ int count;
 byte countflsh = 0; //count aantal flashes in programmeer mode
 byte flashpauze = 0; //tijd van led off in flash
 byte countlp = 0; //count long press van knop 2
-//temp
-
 
 void setup() {
 	//ports
@@ -88,14 +80,11 @@ void setup() {
 	//inits
 	MEM_read();
 
-	//start programma mode, merk op overweg mag niet gesloten zijn 
-	//Shift();
 }
 void MEM_read() {
 	//reads EEPROM variables after power up
 	speedservo = EEPROM.read(10);
 	if (speedservo > 30)speedservo = 20; //20=default value
-
 
 	//uit EEprom halen standen servo
 	servo[0].open = EEPROM.read(11);
@@ -114,6 +103,21 @@ void MEM_read() {
 	servo[1].rq = servo[1].open;
 	servo[0].pos = servo[0].open;
 	servo[1].pos = servo[0].open;
+
+	//knipperfrequentie
+	switch (EEPROM.read(20)) {
+	case 0:
+		knipper = Ahob;
+		break;
+	case 1:
+		break;
+	default:
+		knipper = Ahob;
+		break;
+	}
+
+
+
 
 	sb = 0;
 }
@@ -166,7 +170,7 @@ void read() {
 	}
 	else if (~status & (1 << 2) && ~PINB & (1 << 3)) {
 		countlp++;
-		if (countlp > 50 && ~GPIOR1 & (1 << 2) && pfase>0) {
+		if (countlp > 50 && ~GPIOR1 & (1 << 2) && pfase > 0) {
 			GPIOR1 |= (1 << 2);
 			longpress(); //longpress 
 
@@ -228,26 +232,58 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		settimer(0, 50, B111000, 0); //1sec leds aan, daarna in bedrijf
 		break;
 		//***********flash tussen twee plevels in 
-	case 6:	
+	case 6:
 		settimer(0, 1, B111, 7);
 		break;
 	case 7:
-	settimer(0, 50, B111000, 0);
+		settimer(0, 50, B111000, 0);
 		break;
 		//*********************************************
 
 
 	case 10:
-		//start bel, start lights/sluit bomen 
+
+		//sluit overweg... 
+		GPIOR1 |= (1 << 3); //flag overweg gesloten (direct)
+
+		//start knipperlicht 
+		sb |= (3 << 0); //constante led aan, ie knipper led
+
+		settimer(3, knipper, B010100, 12);
+		//stop blokkeren voor een periode 
+		GPIOR1 |= (1 << 4);
+		settimer(2, 200, 0, 14);
+
+		//sluit bomen
 		for (byte i = 0; i < 2; i++) {
-			servo[i].reg &= ~(1 << 1);
+			//servo[i].reg &= ~(1 << 1);
 			servo[i].reg |= (1 << 0);
-			servo[i].timer = (random(3, 30));
+			servo[i].timer = (random(starttijdbomen, starttijdbomen+20)); 
 			servo[i].timercount = 0;
 		}
 		break;
 
-	case 20: //open bomen
+	case 12:
+		settimer(3, knipper, B100010, 13);
+		break;
+	case 13:
+		settimer(3, knipper, B010100, 12);
+
+		break;
+	case 14: //blokkeerd de stop timer tijdens de start van de bomen beweging
+		GPIOR1 &= ~(1 << 4); //blokkade zie whenclose()
+		break;
+	case 15: //overweg open stop knipper effect
+		timer[3] = 0;
+		sb &= ~(7 << 0); //all leds off
+		break;
+
+	case 20: //open overweg 
+		//GPIOR1 &= ~(1 << 3); //flag overweg open (direct) 
+		//onderstaand straks na bomen zijn gesloten en een random wacht tijd, temp op loslaten knop
+		//sb &= ~(1 << 0); //constante led uit
+
+		//open bomen
 		for (byte i = 0; i < 2; i++) {
 			servo[i].reg &= ~(1 << 0);
 			servo[i].reg |= (1 << 1);
@@ -255,6 +291,11 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 			servo[i].timercount = 0;
 		}
 		break;
+
+
+
+
+
 
 		//******flash in program
 	case 30: //Test servo 1 pfase=2 knipper led links
@@ -360,20 +401,23 @@ void timers() { //called from loop 20ms
 			}
 		}
 	}
+
 	//servo timers (voor de start random)
 	for (byte i = 0; i < 2; i++) {
 		if (servo[i].reg & (1 << 0)) { //timer aan?	
 			servo[i].timercount++;
 			if (servo[i].timercount > servo[i].timer) {
 				servo[i].rq = servo[i].close;
-				servo[i].reg &= ~(1 << 0); //stop timer
+				servo[i].reg &= ~(1 << 0); //stop timer open
+
 			}
 		}
 		else if (servo[i].reg & (1 << 1)) { //timer aan?	{			
 			servo[i].timercount++;
 			if (servo[i].timercount > servo[i].timer) {
 				servo[i].rq = servo[i].open;
-				servo[i].reg &= ~(1 << 1); //stop timer
+				servo[i].reg &= ~(1 << 1); //open
+
 			}
 		}
 	}
@@ -384,20 +428,24 @@ void SWon(byte sw) {
 	//sb |= (1 << sw); //temp led aan
 
 	switch (pfase) {
-	case 0:
+	case 0: //in bedrijf
 		switch (sw) {
-		case 0:
+		case 0: //sensor 1
 			//sv = 1;
 
 			//seq = 52;
 			break;
-		case 1:
+		case 1: //sensor 2
+
 			break;
+
 		case 2:
 			sequence(10);//sluit overweg
 			break;
 		}
 		break;
+
+
 
 	case 1: //pfase=1 led test
 
@@ -427,8 +475,8 @@ void SWon(byte sw) {
 					}
 				}
 				else {
-					flag ^= (1 << 7);
-					if (flag & (1 << 7)) {
+					GPIOR1 ^= (1 << 7);
+					if (GPIOR1 & (1 << 7)) {
 						servo[1].rq = servo[1].close;
 					}
 					else {
@@ -531,7 +579,6 @@ void SWoff(byte sw) {
 		break;
 	}
 }
-
 void Programs() {
 	//reset all timers
 	for (byte i = 0; i < at; i++) {
@@ -547,11 +594,11 @@ void Programs() {
 		EEPROM.update(11, servo[0].open);
 		EEPROM.update(12, servo[0].close);
 		EEPROM.update(13, servo[1].open);
-		EEPROM.update(14, servo[1].close);		
+		EEPROM.update(14, servo[1].close);
 		//leds uit_aan_uit
 		sequence(2);
 		break;
-	case 1: //alle leds on
+	case 1: //alle leds on   laatst?
 		sb |= (7 << 0);
 		break;
 	case 2: //servo 1 test
@@ -562,7 +609,6 @@ void Programs() {
 		break;
 	}
 }
-
 void SV_control() {
 	/*
 	controls de servo's
@@ -570,6 +616,7 @@ void SV_control() {
 	Timer stoppen, servopin laagzetten.
 	In loop wordt bepaald sf= servo focus, welke servo wordt aangestuurd.
 	*/
+
 	if (servo[sf].pos != servo[sf].rq) { //s1rq) 		
 		if (servo[sf].pos > servo[sf].rq) { //  s1rq) {
 			servo[sf].pos--;
@@ -584,10 +631,31 @@ void SV_control() {
 		TCNT1 = 0;
 		TCCR1 = 129; // start timer no prescaler
 	}
+
+	else if (whenclose()) {//(GPIOR1 & (1 << 3)) {
+		//alleen als beide servoos hun eindbestemming hebben bereikt		
+
+		//if (servo[0].rq == servo[0].open && servo[1].rq == servo[1].open) {
+			//boom bereikt stopplek en overweg is open, dus na timer knipperen stoppen
+		GPIOR1 &= ~(1 << 3); //flag (open/dicht)
+		//kan meerdere keren voor komen, timer wordt dan weer gereset
+		settimer(2, 50, 0, 15);
+		//}
+	}
+}
+boolean whenclose() {
+	bool yes = false;
+	if (~GPIOR1 & (1 << 4)) { //blokkade stop proces tijdens starten van de servo
+		if (GPIOR1 & (1 << 3)) { //open dicht flag
+			if ((servo[0].rq == servo[0].open && servo[1].rq == servo[1].open)) {
+				yes = true;
+			}
+		}
+	}
+	return yes;
 }
 void slow() { //1 ms teller
 	slowcount++;
-
 	countservo++;
 	if (countservo > 3 + speedservo) { //servo frequentie regelbaar met speedservo
 		countservo = 0;
@@ -596,20 +664,6 @@ void slow() { //1 ms teller
 		if (GPIOR1 & (1 << 0)) sf = 1;
 		SV_control();
 	}
-
-	/*
-	//servo1
-	if (slowcount == 2) {
-		sf = 0; //servo 1
-		SV_control(); //ieder 20ms
-	}
-	//servo 2
-	if (slowcount == 5) {
-		sf = 1; //servo 1
-		SV_control(); //ieder 20ms eenmalig in de 'pauze'
-	}
-
-*/
 
 	if (slowcount == 10) {
 		timers();
@@ -627,10 +681,9 @@ void slow() { //1 ms teller
 		Shift();
 	}
 }
-
 void loop() {
 	//millis counter
-	if (millis() > oldmillis) {
+	if (millis() != oldmillis) {
 		oldmillis = millis();
 		slow();
 	}

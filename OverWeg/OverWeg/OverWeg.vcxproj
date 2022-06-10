@@ -81,6 +81,8 @@
       <ForcedIncludeFiles>$(ProjectDir)__vm\.OverWeg.vsarduino.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
       <IgnoreStandardIncludePath>true</IgnoreStandardIncludePath>
       <PreprocessorDefinitions>__AVR_attiny85__;__AVR_ATTINY85__;__AVR_ATtiny85__;F_CPU=16000000L;ARDUINO=108013;ARDUINO_attiny;ARDUINO_ARCH_AVR;__cplusplus=201103L;_VMICRO_INTELLISENSE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
