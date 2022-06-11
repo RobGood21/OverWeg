@@ -20,7 +20,7 @@
 
 
 # define apf 3 //aantal program fases
-# define at 4 //aantal timers
+# define at 6 //aantal timers
 # define uit sb &= ~(7 << 0); //zet leds uit
 # define aan sb |=(7<<0); //leds aan
 
@@ -42,13 +42,13 @@ Servo servo[2];
 byte countservo = 5;
 byte speedservo = 0;
 byte tempspeedservo = 0;
-byte timer[at]; //timers 3x? 
-byte timercount[at];
+unsigned int timer[at]; //ingestelde tijd x20ms
+uint16_t timercount[at]; //timerteller per 20ms 
 byte timerlot[at];//(lot=leds on timer) effect op welke leds? 0~2 leds on 3~5 leds off
 byte timerseq[at];
 byte tc = 10; //timing moment of timers
 byte knipper; //tijd van knipperen
-
+byte bedrijf = 0; //fase van in bedrijf 0=open 1=gesloten sensor 1 begin sensor 2 eind 2=gesloten sensor 1 eind sensor 2 begin
 
 
 volatile byte sf = 0; //servo focus welke servo wordt aangestuurd, alleen in loop gebruiken
@@ -96,9 +96,6 @@ void MEM_read() {
 	servo[1].close = EEPROM.read(14);
 	if (servo[1].close < servomin || servo[1].close > servomax)servo[1].close = 80;
 
-
-
-
 	servo[0].rq = servo[0].open; //beginstanden servo1
 	servo[1].rq = servo[1].open;
 	servo[0].pos = servo[0].open;
@@ -121,7 +118,6 @@ void MEM_read() {
 
 	sb = 0;
 }
-
 ISR(TIMER1_COMPA_vect) {
 	//compa A timer 1 =  50 x 0.0625 sec
 	if (pc > servo[sf].pos) { //puls duur bereikt
@@ -132,7 +128,6 @@ ISR(TIMER1_COMPA_vect) {
 	TCNT1 = 0;
 	pc++;
 }
-
 void Shift() {
 	//shifts sb to external shiftregister
 	for (byte i = 7; i < 8; i--) {
@@ -212,7 +207,6 @@ void longpress() {
 
 
 }
-
 void sequence(byte seq) { //od=open dicht open false dicht true
 	//temp
 	byte b = 0;
@@ -258,7 +252,7 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		for (byte i = 0; i < 2; i++) {
 			//servo[i].reg &= ~(1 << 1);
 			servo[i].reg |= (1 << 0);
-			servo[i].timer = (random(starttijdbomen, starttijdbomen+20)); 
+			servo[i].timer = (random(starttijdbomen, starttijdbomen + 20));
 			servo[i].timercount = 0;
 		}
 		break;
@@ -290,12 +284,9 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 			servo[i].timer = (random(3, 30));
 			servo[i].timercount = 0;
 		}
+		//knipperen wordt uitgeschakeld in SV_control
+		bedrijf = 0; //sensoren werken weer in openstand
 		break;
-
-
-
-
-
 
 		//******flash in program
 	case 30: //Test servo 1 pfase=2 knipper led links
@@ -336,9 +327,45 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		break;
 		//********end flash
 
+//*********voor sensoren open en dicht van de overweg
+	case 40: //timer afgelopen, max tijd, van sluiten overweg
+		settimer(4, 5, 0, 20); //open overweg na 5x20ms
+		break;
+	case 41: //sensor voor weer openen overweg geactiveerd
+		//eerst check op sensor vrij is gegeven, detectie stilstaande trein
+
+		if (bedrijf > 0 && bedrijf < 3) {
+			if (status & (1 << 1) && status & (1<<0)) { //sensoren vrij
+				settimer(4, 20, 0, 20); //open overweg na 20x20ms
+			}
+			else {
+				settimer(5, 50, 0, 41); //set timer 2 seconde voor weer openen overweg (reset) beter 2sec?
+			}
+		}
 
 
-		//*******servo heen en weer (speed instellen)
+		/*
+		switch (bedrijf) {
+
+		case 1:
+
+			break;
+		case 2:
+			if (status & (1 << 0)) { //sensor vrij
+				settimer(4, 5, 0, 20); //open overweg na 5x20ms
+			}
+			else {
+				settimer(5, 50, 0, 41); //set timer 2 seconde voor weer openen overweg (reset) beter 2sec?
+			}
+			break;
+		}
+*/
+
+		break;
+
+		//***************************************************
+
+						//*******servo heen en weer (speed instellen)
 	case 50: //start positie program servo
 		servo[sv].rq = servo[sv].open;// (servo[sv].open + servo[sv].close) / 2;
 		settimer(2, 5, 0, 51); //wachtlus totdat servo op positie is
@@ -366,8 +393,6 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		//**********einde servo heen en weer
 	}
 }
-
-
 void settimer(byte number, int time, byte lot, byte seq) {
 	//number= welke timer
 	//time=tijdx20ms
@@ -378,8 +403,6 @@ void settimer(byte number, int time, byte lot, byte seq) {
 	timerlot[number] = lot;
 	timerseq[number] = seq;
 }
-
-
 void timers() { //called from loop 20ms
 	//led timers
 	for (byte i = 0; i < at; i++) {
@@ -422,30 +445,25 @@ void timers() { //called from loop 20ms
 		}
 	}
 }
-
 void SWon(byte sw) {
 	//0=sensor1 1=sensor2 2=switch
 	//sb |= (1 << sw); //temp led aan
-
 	switch (pfase) {
 	case 0: //in bedrijf
 		switch (sw) {
 		case 0: //sensor 1
-			//sv = 1;
-
-			//seq = 52;
+			openclose(sw);
 			break;
 		case 1: //sensor 2
-
+			openclose(sw);
 			break;
 
 		case 2:
 			sequence(10);//sluit overweg
+			bedrijf = 10; //sensoren uitgeschakeld
 			break;
 		}
 		break;
-
-
 
 	case 1: //pfase=1 led test
 
@@ -530,7 +548,6 @@ void SWon(byte sw) {
 		Programs();
 	}
 }
-
 void SWoff(byte sw) {
 	if (sw == 2) {
 		countlp = 0; //reset longpress timer
@@ -544,11 +561,12 @@ void SWoff(byte sw) {
 	case 0:
 		switch (sw) {
 		case 0:
-			break;
+			break; //jo
+
 		case 1:
 			break;
 		case 2:
-			sequence(20);// bomen open dus de overweg
+			sequence(20);//overweg openen
 			break;
 		}
 		break;
@@ -576,6 +594,42 @@ void SWoff(byte sw) {
 		}
 		break;
 	case 3:
+		break;
+	}
+}
+void openclose(byte sw) {
+	//controleerd open en sluiten overweg met sensor inputs 0=sensor1 1=sensor2 pressed!
+	//Timers 4 en 5 exclusief voor deze functie
+	switch (bedrijf) {
+	case 0: //overweg open
+		bedrijf = sw + 1;
+		settimer(4, 3000, 0, 40); //sluiten na 2000*20ms =1 minuut
+		sequence(10); //sluit overweg
+		break;
+	case 1: //overweg gesloten 1>2
+		switch (sw) {
+		case 0: //sensor 1
+			settimer(4, 3000, 0, 40); //reset timer 
+			timer[5] = 0; //reset eventuele timer 5 (trein uit andere richting)
+			break;
+		case 1: //sensor 2
+			settimer(5, 50, 0, 41); //set timer 1 seconde voor weer openen overweg
+			timer[4] = 0;
+			break;
+		}
+		break;
+	case 2: //overweg gesloten 2>1
+		switch (sw) {
+		case 0: //sensor 1
+			settimer(5, 50, 0, 41); //set timer 1 seconde voor weer openen overweg (reset)
+			timer[4] = 0;
+			break;
+		case 1: //sensor 2
+			settimer(4, 3000, 0, 40); //reset timer 1 minuut
+			timer[5] = 0;
+			break;
+		}
+
 		break;
 	}
 }
