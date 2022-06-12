@@ -4,21 +4,18 @@
  Author:	Rob Antonisse
 
  Sketch voor de techniek van een modelspoor overweg
-
+ Een NL AHOB nieuwe instelbaar naar oude stijl 90 of 45 knipper per minuut
 
 */
-
-//byte sb; //shiftbyte GPIOR0 (gaat ff sneller)
-
 #include <EEPROM.h>
 
 # define Ahob 15 //nieuwe ahob snelheid 90x per minuut 
-# define Ahobold 32 //oude ahob 45x per minuut
-# define starttijdbomen 50 //hoelang minimaal tussen starten knipperlicht en sluiten bomen
-//????starttijdbomen instelling van maken
+# define Ahob_old 30 //oude ahob 45x per minuut
+
+# define starttijdbomen 25 //hoelang minimaal tussen starten knipperlicht en sluiten bomen
 
 
-
+# define akt 2 //aantal knipper types, soorten overweg systemen
 # define apf 3 //aantal program fases
 # define at 6 //aantal timers
 # define uit sb &= ~(7 << 0); //zet leds uit
@@ -38,6 +35,7 @@ struct Servo
 	unsigned int timer;
 	unsigned int timercount;
 };
+
 Servo servo[2];
 byte countservo = 5;
 byte speedservo = 0;
@@ -47,10 +45,9 @@ uint16_t timercount[at]; //timerteller per 20ms
 byte timerlot[at];//(lot=leds on timer) effect op welke leds? 0~2 leds on 3~5 leds off
 byte timerseq[at];
 byte tc = 10; //timing moment of timers
-byte knipper; //tijd van knipperen
+byte knipper = 0; //tijd van knipperen
+byte knippertype = 0; //default 0 is 90x per minuut
 byte bedrijf = 0; //fase van in bedrijf 0=open 1=gesloten sensor 1 begin sensor 2 eind 2=gesloten sensor 1 eind sensor 2 begin
-
-
 volatile byte sf = 0; //servo focus welke servo wordt aangestuurd, alleen in loop gebruiken
 byte sv; //focus welke servo in program mode
 
@@ -95,28 +92,28 @@ void MEM_read() {
 	if (servo[1].open < servomin || servo[1].open > servomax)servo[1].open = 180;
 	servo[1].close = EEPROM.read(14);
 	if (servo[1].close < servomin || servo[1].close > servomax)servo[1].close = 80;
-
-	servo[0].rq = servo[0].open; //beginstanden servo1
+//beginstanden servo1
+	servo[0].rq = servo[0].open; 
 	servo[1].rq = servo[1].open;
 	servo[0].pos = servo[0].open;
 	servo[1].pos = servo[0].open;
 
 	//knipperfrequentie
-	switch (EEPROM.read(20)) {
+	knippertype = EEPROM.read(15);
+	if (knippertype >= akt)knippertype = 0;
+	setknipper();
+	sb = 0;
+}
+void setknipper() {
+	//meer soorten toevoegen mogelijk. 
+	switch (knippertype) {
 	case 0:
 		knipper = Ahob;
 		break;
 	case 1:
-		break;
-	default:
-		knipper = Ahob;
+		knipper = Ahob_old;
 		break;
 	}
-
-
-
-
-	sb = 0;
 }
 ISR(TIMER1_COMPA_vect) {
 	//compa A timer 1 =  50 x 0.0625 sec
@@ -156,7 +153,6 @@ void read() {
 		status &= ~(1 << 4);
 	}
 	//leest switches en melders	bit 0~2  sensors and switch
-
 	if (status & (1 << count) && ~PINB & (1 << 3)) {
 		SWon(count);
 	}
@@ -168,8 +164,6 @@ void read() {
 		if (countlp > 50 && ~GPIOR1 & (1 << 2) && pfase > 0) {
 			GPIOR1 |= (1 << 2);
 			longpress(); //longpress 
-
-
 		}
 	}
 	//huidige schakel stand opslaan in status bit
@@ -203,15 +197,10 @@ void longpress() {
 		servo[sv].rq = servo[sv].close;
 		break;
 	}
-
-
-
 }
-void sequence(byte seq) { //od=open dicht open false dicht true
-	//temp
+void sequence(byte seq) { 
 	byte b = 0;
 	//cyclus, sequence
-
 	switch (seq) {
 	case 0: // free
 		break;
@@ -233,21 +222,15 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		settimer(0, 50, B111000, 0);
 		break;
 		//*********************************************
-
-
 	case 10:
-
 		//sluit overweg... 
 		GPIOR1 |= (1 << 3); //flag overweg gesloten (direct)
-
 		//start knipperlicht 
 		sb |= (3 << 0); //constante led aan, ie knipper led
-
 		settimer(3, knipper, B010100, 12);
 		//stop blokkeren voor een periode 
 		GPIOR1 |= (1 << 4);
 		settimer(2, 200, 0, 14);
-
 		//sluit bomen
 		for (byte i = 0; i < 2; i++) {
 			//servo[i].reg &= ~(1 << 1);
@@ -262,7 +245,6 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		break;
 	case 13:
 		settimer(3, knipper, B010100, 12);
-
 		break;
 	case 14: //blokkeerd de stop timer tijdens de start van de bomen beweging
 		GPIOR1 &= ~(1 << 4); //blokkade zie whenclose()
@@ -271,13 +253,7 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		timer[3] = 0;
 		sb &= ~(7 << 0); //all leds off
 		break;
-
-	case 20: //open overweg 
-		//GPIOR1 &= ~(1 << 3); //flag overweg open (direct) 
-		//onderstaand straks na bomen zijn gesloten en een random wacht tijd, temp op loslaten knop
-		//sb &= ~(1 << 0); //constante led uit
-
-		//open bomen
+	case 20: //open overweg 	
 		for (byte i = 0; i < 2; i++) {
 			servo[i].reg &= ~(1 << 0);
 			servo[i].reg |= (1 << 1);
@@ -287,7 +263,6 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		//knipperen wordt uitgeschakeld in SV_control
 		bedrijf = 0; //sensoren werken weer in openstand
 		break;
-
 		//******flash in program
 	case 30: //Test servo 1 pfase=2 knipper led links
 		//led off na flash
@@ -335,37 +310,17 @@ void sequence(byte seq) { //od=open dicht open false dicht true
 		//eerst check op sensor vrij is gegeven, detectie stilstaande trein
 
 		if (bedrijf > 0 && bedrijf < 3) {
-			if (status & (1 << 1) && status & (1<<0)) { //sensoren vrij
+			if (status & (1 << 1) && status & (1 << 0)) { //sensoren vrij
 				settimer(4, 20, 0, 20); //open overweg na 20x20ms
 			}
 			else {
 				settimer(5, 50, 0, 41); //set timer 2 seconde voor weer openen overweg (reset) beter 2sec?
 			}
 		}
-
-
-		/*
-		switch (bedrijf) {
-
-		case 1:
-
-			break;
-		case 2:
-			if (status & (1 << 0)) { //sensor vrij
-				settimer(4, 5, 0, 20); //open overweg na 5x20ms
-			}
-			else {
-				settimer(5, 50, 0, 41); //set timer 2 seconde voor weer openen overweg (reset) beter 2sec?
-			}
-			break;
-		}
-*/
-
 		break;
 
 		//***************************************************
-
-						//*******servo heen en weer (speed instellen)
+	//*******servo heen en weer (speed instellen)
 	case 50: //start positie program servo
 		servo[sv].rq = servo[sv].open;// (servo[sv].open + servo[sv].close) / 2;
 		settimer(2, 5, 0, 51); //wachtlus totdat servo op positie is
@@ -466,19 +421,9 @@ void SWon(byte sw) {
 		break;
 
 	case 1: //pfase=1 led test
-
-		switch (sw) {
-		case 0:
-			break;
-		case 1:
-			break;
-		case 2:
-			break;
-		}
 		break;
 
 	case 2: //pfase=2 servo  test en instellen
-
 		switch (sw) {
 		case 2:
 			switch (plevel) {
@@ -507,11 +452,15 @@ void SWon(byte sw) {
 			break;
 		}
 		break;
-	case 3:
+
+	case 3: //knipperfrequentie
+		if (sw == 2) { //alleen knop 3 heeft hier een functie
+			knippertype++;
+			if (knippertype >= akt) knippertype = 0;
+			setknipper();
+		}
 		break;
 	}
-
-
 	if (sw == 4) {
 		//program switch aparte knop op PB4, moet altijd onafhankelijk van program fase
 
@@ -541,7 +490,7 @@ void SWon(byte sw) {
 		default:
 			plevel = 0;
 			pfase++;
-			if (pfase > apf)pfase = 0; //apf aantal program fases zie #define
+			if (pfase > apf) pfase = 0; //apf aantal program fases zie #define
 			break;
 		} //end pfase
 
@@ -553,10 +502,6 @@ void SWoff(byte sw) {
 		countlp = 0; //reset longpress timer
 		GPIOR1 &= ~(1 << 2);
 	}
-
-
-	//sb &= ~(1 << sw); //temp led off
-
 	switch (pfase) {
 	case 0:
 		switch (sw) {
@@ -637,7 +582,9 @@ void Programs() {
 	//reset all timers
 	for (byte i = 0; i < at; i++) {
 		timer[i] = 0;
+		timercount[i] = 0;
 	}
+
 	GPIOR1 &= ~(1 << 2);  //reset one shot long press
 
 	switch (pfase) {
@@ -649,6 +596,8 @@ void Programs() {
 		EEPROM.update(12, servo[0].close);
 		EEPROM.update(13, servo[1].open);
 		EEPROM.update(14, servo[1].close);
+		EEPROM.update(15, knippertype);
+		bedrijf = 0;
 		//leds uit_aan_uit
 		sequence(2);
 		break;
@@ -659,7 +608,9 @@ void Programs() {
 		uit;
 		sequence(30);
 		break;
-	case 3: //servo 2 test
+	case 3:
+		//uit;
+		settimer(3, knipper, B010100, 12);
 		break;
 	}
 }
