@@ -86,7 +86,20 @@ void setup() {
 	//inits
 	MEM_read();
 
+	//factory reset
+	if (~PINB & (1 << 4)) { //knop P (2e) ingedrukt
+		sequence(60);
+		plevel = 10;
+	}
 }
+
+void factory() {
+	for (byte i = 0; i < 100; i++) {
+		EEPROM.write(i, 0xFF);
+
+	}
+}
+
 void MEM_read() {
 	//reads EEPROM variables after power up
 	speedservo = EEPROM.read(10);
@@ -367,6 +380,13 @@ void sequence(byte seq) {
 		settimer(2, 5, 0, 51); //wachtlus totdat servo op positie is
 		break;
 		//**********einde servo heen en weer
+
+	case 60: //knippereffect eeprom  reset
+		settimer(1, 5, B000111, 61); //alle leds aan
+		break;
+	case 61:
+		settimer(1, 5, B111000, 60);
+		break;
 	}
 }
 void settimer(byte number, int time, byte lot, byte seq) {
@@ -484,6 +504,14 @@ void SWon(byte sw) {
 	}
 	if (sw == 4) {
 		//program switch aparte knop op PB4, moet altijd onafhankelijk van program fase
+		if (plevel == 10) {
+			plevel = 0;
+			resettimers();
+			uit;
+			factory();
+			return;
+		}
+
 
 		switch (pfase) {
 		case 2: //uitzondering voor de twee servoos
@@ -499,15 +527,19 @@ void SWon(byte sw) {
 				}
 				break;
 			case 1: //snelheid servo bewegingen instellen
-
+				if (speedservo<100) speedservo++;	//100 is langzaamste speed van de servoos			
 				break;
 
 			case 2: //instellen servo open positie
-				if (servo[sv].open > servomin) servo[sv].open--;
+				//if (servo[sv].open > servomin)
+					servo[sv].open--;
 				servo[sv].rq = servo[sv].open;
 				break;
+
+
 			case 3: //instellen servo close positie
-				if (servo[sv].close > servomin) servo[sv].close--;
+				//if (servo[sv].close > servomin)	
+					servo[sv].close--;
 				servo[sv].rq = servo[sv].close;
 				break;
 			} //end plevel
@@ -550,16 +582,18 @@ void SWoff(byte sw) {
 			switch (plevel) {
 
 			case 1: //speed servo's sublevel
-				speedservo--;
-				if (speedservo > 30)speedservo = 30;
+				speedservo --;
+				if (speedservo > 100)speedservo = 1; //hoe lager hoe sneller 1=max speed
 				break;
 
 			case 2:
-				if (servo[sv].open < servomax) servo[sv].open++;
+				//if (servo[sv].open < servomax) 
+				servo[sv].open++;
 				servo[sv].rq = servo[sv].open;
 				break;
 			case 3: //instellen positie close
-				if (servo[sv].close < servomax) servo[sv].close++;
+				//if (servo[sv].close < servomax) 
+				servo[sv].close++;
 				servo[sv].rq = servo[sv].close;
 				break;
 			}
