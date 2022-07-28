@@ -6,6 +6,10 @@
  Sketch voor de techniek van een modelspoor overweg
  Een NL AHOB nieuwe instelbaar naar oude stijl 90 of 45 knipper per minuut
 
+ BELANGRIJK!
+ Zorg dat de servo vrij kan draaien tijdens het uploaden van de sketch
+
+ Laatste bewerking: 28juli2022
 */
 #include <EEPROM.h>
 
@@ -13,6 +17,9 @@
 # define Ahob_old 30 //oude ahob 45x per minuut
 
 # define starttijdbomen 25 //hoelang minimaal tussen starten knipperlicht en sluiten bomen
+# define defspeed 50 //default snelheid 
+# define defmin 143 //gesloten
+# define defmax 100 //open
 
 
 # define akt 2 //aantal knipper types, soorten overweg systemen
@@ -21,8 +28,8 @@
 # define uit sb &= ~(7 << 0); //zet leds uit
 # define aan sb |=(7<<0); //leds aan
 
-# define servomin 30  //minimaal bereik open
-# define servomax 240 //maximaal bereik close
+# define servomin 200  //minimaal bereik open
+# define servomax 80 //maximaal bereik close
 # define sb GPIOR0 //gebruik ingebakken register
 byte status = 7; //bit0=M1/s1 bit1=M2/s2 bit2=SW/s0
 struct Servo
@@ -37,9 +44,11 @@ struct Servo
 };
 
 Servo servo[2];
+
 byte countservo = 5;
 byte speedservo = 0;
 byte tempspeedservo = 0;
+
 unsigned int timer[at]; //ingestelde tijd x20ms
 uint16_t timercount[at]; //timerteller per 20ms 
 byte timerlot[at];//(lot=leds on timer) effect op welke leds? 0~2 leds on 3~5 leds off
@@ -81,18 +90,19 @@ void setup() {
 void MEM_read() {
 	//reads EEPROM variables after power up
 	speedservo = EEPROM.read(10);
-	if (speedservo > 30)speedservo = 20; //20=default value
+	if (speedservo > 100)speedservo = defspeed; //default value
 
 	//uit EEprom halen standen servo
 	servo[0].open = EEPROM.read(11);
-	if (servo[0].open < servomin || servo[0].open > servomax)servo[0].open = 180;
+	if (servo[0].open < servomin || servo[0].open > servomax)servo[0].open = defmax;
 	servo[0].close = EEPROM.read(12);
-	if (servo[0].close < servomin || servo[0].close > servomax)servo[0].close = 80;
+	if (servo[0].close < servomin || servo[0].close > servomax)servo[0].close = defmin;
 	servo[1].open = EEPROM.read(13);
-	if (servo[1].open < servomin || servo[1].open > servomax)servo[1].open = 180;
+	if (servo[1].open < servomin || servo[1].open > servomax)servo[1].open = defmax;
 	servo[1].close = EEPROM.read(14);
-	if (servo[1].close < servomin || servo[1].close > servomax)servo[1].close = 80;
+	if (servo[1].close < servomin || servo[1].close > servomax)servo[1].close = defmin;
 //beginstanden servo1
+
 	servo[0].rq = servo[0].open; 
 	servo[1].rq = servo[1].open;
 	servo[0].pos = servo[0].open;
@@ -176,19 +186,30 @@ void read() {
 }
 void longpress() {
 	sequence(6); //flash
+	plevel++; //verhoog het sublevel
 
-	plevel++;
-	switch (pfase) {
-	case 2: //instellen aantal levels in deze pfase
+	switch (pfase) { 
+	case 2: //instellen aantal sublevels in deze pfase
 		if (plevel > 3)plevel = 0;
 		break;
 	}
+
 	timer[2] = 0; //reset de te gebruiken timer
 	switch (plevel) {
-	case 1: //servo instellen snelheid 
-		//dubbel knipper op contra led
-		sequence(50);
+	case 0: //laatste level bereikt, programfase afsluiten //287
+		pfase = 0; 
+		plevel = 0;
+		resettimers();
+		Programs();
+
+
 		break;
+
+	case 1: //servo instellen snelheid 
+		
+		sequence(50); //dubbel knipper op contra led
+		break;
+
 	case 2: //servo instellen positie open
 		//triple knipper		
 		servo[sv].rq = servo[sv].open;
@@ -426,7 +447,7 @@ void SWon(byte sw) {
 	case 2: //pfase=2 servo  test en instellen
 		switch (sw) {
 		case 2:
-			switch (plevel) {
+			switch (plevel) { //Servo testen 
 			case 0:
 				if (sv == 0) {
 					GPIOR1 ^= (1 << 6);
@@ -466,16 +487,21 @@ void SWon(byte sw) {
 
 		switch (pfase) {
 		case 2: //uitzondering voor de twee servoos
-			switch (plevel) {
-			case 0:
+			switch (plevel) { //sublevel
+			case 0: //alleen testen servo, wisselen van servo
 				if (sv == 0) {
 					sv = 1;
 				}
 				else {
-					pfase++;
+					pfase++; //287
+					resettimers();
 					sv = 0;
 				}
 				break;
+			case 1: //snelheid servo bewegingen instellen
+
+				break;
+
 			case 2: //instellen servo open positie
 				if (servo[sv].open > servomin) servo[sv].open--;
 				servo[sv].rq = servo[sv].open;
@@ -490,6 +516,7 @@ void SWon(byte sw) {
 		default:
 			plevel = 0;
 			pfase++;
+			resettimers();
 			if (pfase > apf) pfase = 0; //apf aantal program fases zie #define
 			break;
 		} //end pfase
@@ -517,14 +544,16 @@ void SWoff(byte sw) {
 		break;
 	case 1:
 		break;
-	case 2: //servo  test en program
+	case 2: //servo  test en program //werkt op loslaten knop!
 		switch (sw) {
 		case 2: //knop S
 			switch (plevel) {
-			case 1: //speed servo
+
+			case 1: //speed servo's sublevel
 				speedservo--;
 				if (speedservo > 30)speedservo = 30;
 				break;
+
 			case 2:
 				if (servo[sv].open < servomax) servo[sv].open++;
 				servo[sv].rq = servo[sv].open;
@@ -578,12 +607,17 @@ void openclose(byte sw) {
 		break;
 	}
 }
-void Programs() {
-	//reset all timers
+
+void resettimers() {
 	for (byte i = 0; i < at; i++) {
 		timer[i] = 0;
 		timercount[i] = 0;
 	}
+}
+
+void Programs() {
+	//resettimers(); //287
+
 
 	GPIOR1 &= ~(1 << 2);  //reset one shot long press
 
