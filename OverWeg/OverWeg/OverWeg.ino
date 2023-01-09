@@ -10,6 +10,12 @@
  Zorg dat de servo vrij kan draaien tijdens het uploaden van de sketch
 
  Laatste bewerking: 28juli2022
+
+ V2.02 9 jan 2023
+ Bug aangepaste servo standen worden niet opgeslagen
+ Logica fout in MEMread ...fixed
+
+
 */
 #include <EEPROM.h>
 
@@ -107,16 +113,40 @@ void MEM_read() {
 
 	//uit EEprom halen standen servo
 	servo[0].open = EEPROM.read(11);
-	if (servo[0].open < servomin || servo[0].open > servomax)servo[0].open = defmax;
+	if (servo[0].open == 0xFF) {
+		servo[0].open = defmax;
+		EEPROM.update(11, servo[0].open);
+	}
+
+	//if (servo[0].open < servomin || servo[0].open > servomax)servo[0].open = defmin;
+
 	servo[0].close = EEPROM.read(12);
-	if (servo[0].close < servomin || servo[0].close > servomax)servo[0].close = defmin;
+
+	if (servo[0].close == 0xFF) {
+		servo[0].close = defmin;
+		EEPROM.update(12, servo[0].close);
+	}
+
+	//if (servo[0].close < servomin || servo[0].close > servomax)servo[0].close = defmax;
+
+
 	servo[1].open = EEPROM.read(13);
-	if (servo[1].open < servomin || servo[1].open > servomax)servo[1].open = defmax;
+	if (servo[1].open == 0xFF) {
+		servo[1].open = defmax;
+		EEPROM.update(13, servo[1].open);
+	}
+	//if (servo[1].open < servomin || servo[1].open > servomax)servo[1].open = defmax;
+
 	servo[1].close = EEPROM.read(14);
-	if (servo[1].close < servomin || servo[1].close > servomax)servo[1].close = defmin;
+	if (servo[1].close == 0xFF) {
+		servo[1].close = defmin;
+		EEPROM.update(14, servo[1].close);
+	}
+
+	//if (servo[1].close < servomin || servo[1].close > servomax)servo[1].close = defmin;
 //beginstanden servo1
 
-	servo[0].rq = servo[0].open; 
+	servo[0].rq = servo[0].open;
 	servo[1].rq = servo[1].open;
 	servo[0].pos = servo[0].open;
 	servo[1].pos = servo[0].open;
@@ -201,7 +231,7 @@ void longpress() {
 	sequence(6); //flash
 	plevel++; //verhoog het sublevel
 
-	switch (pfase) { 
+	switch (pfase) {
 	case 2: //instellen aantal sublevels in deze pfase
 		if (plevel > 3)plevel = 0;
 		break;
@@ -210,7 +240,7 @@ void longpress() {
 	timer[2] = 0; //reset de te gebruiken timer
 	switch (plevel) {
 	case 0: //laatste level bereikt, programfase afsluiten //287
-		pfase = 0; 
+		pfase = 0;
 		plevel = 0;
 		resettimers();
 		Programs();
@@ -219,7 +249,7 @@ void longpress() {
 		break;
 
 	case 1: //servo instellen snelheid 
-		
+
 		sequence(50); //dubbel knipper op contra led
 		break;
 
@@ -232,7 +262,7 @@ void longpress() {
 		break;
 	}
 }
-void sequence(byte seq) { 
+void sequence(byte seq) {
 	byte b = 0;
 	//cyclus, sequence
 	switch (seq) {
@@ -527,19 +557,19 @@ void SWon(byte sw) {
 				}
 				break;
 			case 1: //snelheid servo bewegingen instellen
-				if (speedservo<100) speedservo++;	//100 is langzaamste speed van de servoos			
+				if (speedservo < 100) speedservo++;	//100 is langzaamste speed van de servoos			
 				break;
 
 			case 2: //instellen servo open positie
 				//if (servo[sv].open > servomin)
-					servo[sv].open--;
+				servo[sv].open--;
 				servo[sv].rq = servo[sv].open;
 				break;
 
 
 			case 3: //instellen servo close positie
 				//if (servo[sv].close > servomin)	
-					servo[sv].close--;
+				servo[sv].close--;
 				servo[sv].rq = servo[sv].close;
 				break;
 			} //end plevel
@@ -582,7 +612,7 @@ void SWoff(byte sw) {
 			switch (plevel) {
 
 			case 1: //speed servo's sublevel
-				speedservo --;
+				speedservo--;
 				if (speedservo > 100)speedservo = 1; //hoe lager hoe sneller 1=max speed
 				break;
 
